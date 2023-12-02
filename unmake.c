@@ -104,9 +104,11 @@ static void um_run(void)
 
 /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/ /*/*/
 
-int main(void)
+int main(int argc, char **argv)
 {
-    um_executable("um", "ooo");
+    (void)argc;
+
+    um_executable(argv[0], __FILE__);
     um_run();
 
     return EXIT_SUCCESS;
