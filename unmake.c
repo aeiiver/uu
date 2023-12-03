@@ -9,6 +9,8 @@
 
 #define _UM_NB_EXECS_MAX 32
 #define _UM_NB_DEPS_MAX 128
+#define _UM_NB_CFLAGS_MAX 32
+#define _UM_STRLEN_CFLAGS_MAX 256
 
 struct _um_exec {
     const char *name;
@@ -19,6 +21,11 @@ struct _um_exec {
 static struct {
     size_t nb_execs;
     struct _um_exec execs[_UM_NB_EXECS_MAX];
+
+    size_t nb_cflags;
+    char *cflags[_UM_NB_CFLAGS_MAX];
+    size_t cflags_strlen;
+    char cflags_str[_UM_STRLEN_CFLAGS_MAX];
 } _um;
 
 static void _um_executable(const char *name, const char **files)
@@ -37,14 +44,46 @@ static void _um_executable(const char *name, const char **files)
 
 #define um_executable(name, ...) _um_executable(name, (const char *[]) { __VA_ARGS__, NULL })
 
+static void _um_cflags(const char *file, const char *cflags, size_t cflags_len)
+{
+    if (file) {
+        assert(0 && "TODO: implement file-specific cflags");
+    }
+
+    assert(cflags_len <= _UM_STRLEN_CFLAGS_MAX);
+    _um.cflags_strlen = cflags_len;
+    memcpy(_um.cflags_str, cflags, _um.cflags_strlen);
+
+    for (size_t i = 0; i < _um.cflags_strlen; i += 1) {
+        if (_um.cflags_str[i] == ' ') {
+            _um.cflags_str[i] = 0;
+            continue;
+        }
+
+        assert(_um.nb_cflags < _UM_NB_CFLAGS_MAX);
+        _um.cflags[_um.nb_cflags] = &_um.cflags_str[i];
+        _um.nb_cflags += 1;
+
+        for (; _um.cflags_str[i] && _um.cflags_str[i] != ' '; i += 1) { }
+        if (_um.cflags_str[i]) {
+            i -= 1;
+        }
+    }
+}
+
+#define um_cflags(file, cflags) _um_cflags(file, cflags, sizeof(cflags))
+
 static void _um_build(struct _um_exec *exec)
 {
-    size_t nb_args = exec->nb_deps + 4;
+    // TODO: implement file-specific cflags
+
+    size_t nb_args = 3 + exec->nb_deps + _um.nb_cflags + 1;
     char *args[nb_args];
     args[0] = "cc";
     args[1] = "-o";
     args[2] = (char *)exec->name;
     memcpy(&args[3], exec->deps, sizeof(*exec->deps) * exec->nb_deps);
+    memcpy(&args[3 + exec->nb_deps], _um.cflags, sizeof(*_um.cflags) * _um.nb_cflags);
     args[nb_args - 1] = NULL;
 
     fputs("[CMD] ", stdout);
@@ -108,6 +147,10 @@ int main(int argc, char **argv)
 {
     (void)argc;
 
+    um_cflags(NULL, "-std=c17 -Wall -Wextra"
+                    " -Wpedantic -pedantic-errors"
+                    " -Wmissing-prototypes -Wshadow=local"
+                    " -Wconversion -Warith-conversion");
     um_executable(argv[0], __FILE__);
     um_run();
 
