@@ -12,20 +12,24 @@
 #define _UM_NB_CFLAGS_MAX 32
 #define _UM_STRLEN_CFLAGS_MAX 256
 
+struct _um_cflags {
+    size_t nb_args;
+    char *args[_UM_NB_CFLAGS_MAX];
+    size_t strlen;
+    char str[_UM_STRLEN_CFLAGS_MAX];
+};
+
 struct _um_exec {
     const char *name;
     size_t nb_deps;
     const char *deps[_UM_NB_DEPS_MAX];
+    struct _um_cflags cflags;
 };
 
 static struct {
     size_t nb_execs;
     struct _um_exec execs[_UM_NB_EXECS_MAX];
-
-    size_t nb_cflags;
-    char *cflags[_UM_NB_CFLAGS_MAX];
-    size_t cflags_strlen;
-    char cflags_str[_UM_STRLEN_CFLAGS_MAX];
+    struct _um_cflags cflags;
 } _um;
 
 static void _um_executable(const char *name, const char **files)
@@ -44,28 +48,50 @@ static void _um_executable(const char *name, const char **files)
 
 #define um_executable(name, ...) _um_executable(name, (const char *[]) { __VA_ARGS__, NULL })
 
+static struct _um_exec *_um_find_executable(const char *name)
+{
+    for (size_t i = 0; i < _um.nb_execs; i += 1) {
+        if (strcmp(_um.execs[i].name, name) == 0) {
+            return &_um.execs[i];
+        }
+    }
+    return NULL;
+}
+
 static void _um_cflags(const char *file, const char *cflags, size_t cflags_len)
 {
+    struct _um_cflags *cf;
     if (file) {
-        assert(0 && "TODO: implement file-specific cflags");
+        struct _um_exec *exec = _um_find_executable(file);
+        if (exec) {
+            cf = &exec->cflags;
+        } else {
+            fprintf(stderr,
+                    "[WARN] Attempted to set CFLAGS to non-registered executable '%s'.\n"
+                    "[WARN] Falling back to global CFLAGS. Make sure you do call um_cflags *after* um_executable.\n",
+                    file);
+            cf = &_um.cflags;
+        }
+    } else {
+        cf = &_um.cflags;
     }
 
     assert(cflags_len <= _UM_STRLEN_CFLAGS_MAX);
-    _um.cflags_strlen = cflags_len;
-    memcpy(_um.cflags_str, cflags, _um.cflags_strlen);
+    cf->strlen = cflags_len;
+    memcpy(cf->str, cflags, cf->strlen);
 
-    for (size_t i = 0; i < _um.cflags_strlen; i += 1) {
-        if (_um.cflags_str[i] == ' ') {
-            _um.cflags_str[i] = 0;
+    for (size_t i = 0; i < cf->strlen; i += 1) {
+        if (cf->str[i] == ' ') {
+            cf->str[i] = 0;
             continue;
         }
 
-        assert(_um.nb_cflags < _UM_NB_CFLAGS_MAX);
-        _um.cflags[_um.nb_cflags] = &_um.cflags_str[i];
-        _um.nb_cflags += 1;
+        assert(cf->nb_args < _UM_NB_CFLAGS_MAX);
+        cf->args[cf->nb_args] = &cf->str[i];
+        cf->nb_args += 1;
 
-        for (; _um.cflags_str[i] && _um.cflags_str[i] != ' '; i += 1) { }
-        if (_um.cflags_str[i]) {
+        for (; cf->str[i] && cf->str[i] != ' '; i += 1) { }
+        if (cf->str[i]) {
             i -= 1;
         }
     }
@@ -75,15 +101,20 @@ static void _um_cflags(const char *file, const char *cflags, size_t cflags_len)
 
 static void _um_build(struct _um_exec *exec)
 {
-    // TODO: implement file-specific cflags
+    struct _um_cflags cf;
+    if (exec->cflags.nb_args > 0) {
+        cf = exec->cflags;
+    } else {
+        cf = _um.cflags;
+    }
 
-    size_t nb_args = 3 + exec->nb_deps + _um.nb_cflags + 1;
+    size_t nb_args = 3 + exec->nb_deps + cf.nb_args + 1;
     char *args[nb_args];
     args[0] = "cc";
     args[1] = "-o";
     args[2] = (char *)exec->name;
     memcpy(&args[3], exec->deps, sizeof(*exec->deps) * exec->nb_deps);
-    memcpy(&args[3 + exec->nb_deps], _um.cflags, sizeof(*_um.cflags) * _um.nb_cflags);
+    memcpy(&args[3 + exec->nb_deps], cf.args, sizeof(*cf.args) * cf.nb_args);
     args[nb_args - 1] = NULL;
 
     fputs("[CMD] ", stdout);
@@ -147,11 +178,14 @@ int main(int argc, char **argv)
 {
     (void)argc;
 
-    um_cflags(NULL, "-std=c17 -Wall -Wextra"
-                    " -Wpedantic -pedantic-errors"
-                    " -Wmissing-prototypes -Wshadow=local"
-                    " -Wconversion -Warith-conversion");
     um_executable(argv[0], __FILE__);
+    um_cflags(argv[0], " -O0 -ggdb -std=c17"
+                       " -Wall -Wextra"
+                       " -Wpedantic -pedantic-errors"
+                       " -Wmissing-prototypes -Wshadow=local"
+                       " -Wconversion -Warith-conversion"
+                       " -Werror");
+
     um_run();
 
     return EXIT_SUCCESS;
