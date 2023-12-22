@@ -6,13 +6,38 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-struct exec {
-    char *name;
-    char *deps[32];
-    char *cflags[32];
-};
+#define err(msg) (perror("ERROR: " msg), exit(EXIT_FAILURE))
 
-static void _uu_forkexec(struct exec exec)
+typedef struct {
+    char *name;
+    char *files[32];
+    char *opts[32];
+} exec;
+
+static int uu_forkexec(char **argv)
+{
+    int pid = fork();
+    switch (pid) {
+    case 0:
+        execvp(argv[0], argv);
+        err("execvp");
+    case -1:
+        err("fork");
+    default: {
+        int status;
+        if (waitpid(pid, &status, 0) < 0) {
+            err("waitpid");
+        }
+        if (!WIFEXITED(status)) {
+            fputs("ERROR: waitpid: Child caught deadly signal\n", stderr);
+            exit(EXIT_FAILURE);
+        }
+        return WEXITSTATUS(status);
+    }
+    }
+}
+
+static int uu_cc(exec exec)
 {
     char *argv[64];
     {
@@ -24,8 +49,8 @@ static void _uu_forkexec(struct exec exec)
         printf("%s ", argv[i]);
         i += 1;
 
-        for (int c = 0; exec.cflags[c]; c += 1) {
-            argv[i] = exec.cflags[c];
+        for (int o = 0; exec.opts[o]; o += 1) {
+            argv[i] = exec.opts[o];
             printf("%s ", argv[i]);
             i += 1;
         }
@@ -38,8 +63,8 @@ static void _uu_forkexec(struct exec exec)
         printf("%s ", argv[i]);
         i += 1;
 
-        for (int d = 0; exec.deps[d]; d += 1) {
-            argv[i] = exec.deps[d];
+        for (int f = 0; exec.files[f]; f += 1) {
+            argv[i] = exec.files[f];
             printf("%s ", argv[i]);
             i += 1;
         }
@@ -47,58 +72,37 @@ static void _uu_forkexec(struct exec exec)
         argv[i] = NULL;
         putchar('\n');
     }
-
-    int pid = fork();
-    switch (pid) {
-    case 0:
-        execvp(argv[0], argv);
-        perror("ERROR: execvp");
-        exit(EXIT_FAILURE);
-    case -1:
-        perror("ERROR: fork");
-        exit(EXIT_FAILURE);
-    default:
-        if (waitpid(pid, NULL, 0) == -1) {
-            perror("ERROR: waitpid");
-            exit(EXIT_FAILURE);
-        }
-    }
+    return uu_forkexec(argv);
 }
 
-static void uu(struct exec exec)
+static int uu(exec exec)
 {
     struct stat st_exec;
-    if (stat(exec.name, &st_exec) == -1) {
+    if (stat(exec.name, &st_exec) < 0) {
         if (errno != ENOENT) {
-            perror("ERROR: stat exec");
-            exit(EXIT_FAILURE);
+            err("stat exec");
         }
-        _uu_forkexec(exec);
-        return;
+        return uu_cc(exec) == 0;
     }
 
-    for (int i = 0; exec.deps[i]; i += 1) {
-        struct stat st_dep;
-        if (stat(exec.deps[i], &st_dep) == -1) {
-            perror("ERROR: stat dep");
-            exit(EXIT_FAILURE);
+    for (int i = 0; exec.files[i]; i += 1) {
+        struct stat st_file;
+        if (stat(exec.files[i], &st_file) < 0) {
+            err("stat file");
         }
-        if (st_exec.st_mtime < st_dep.st_mtime) {
-            _uu_forkexec(exec);
-            return;
+        if (st_exec.st_mtime < st_file.st_mtime) {
+            return uu_cc(exec) == 0;
         }
     }
+    return 0;
 }
 
 int main(int argc, char **argv)
 {
-    (void)argc;
-
-    uu((struct exec) {
-        argv[0],
-        { __FILE__ },
-        { "-O3", "-std=c17" },
-    });
+    if (uu((exec) { argv[0], { __FILE__ }, { "-O3", "-std=c17" } })) {
+        execvp(argv[0], (char *[]) { argv[0], NULL });
+        err("execvp on self");
+    }
 
     return EXIT_SUCCESS;
 }
