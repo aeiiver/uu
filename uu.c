@@ -2,9 +2,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// FIXME: These headers might cause some issues but my current setup didn't
+//        catch any. Check if this works on a real windows machine.
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
+
+#if defined(__linux__)
+#  include <sys/wait.h>
+#elif defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#else
+#  error "Unsupported system"
+#endif
 
 #define err(msg) (perror("ERROR: " msg), exit(EXIT_FAILURE))
 
@@ -14,6 +24,7 @@ typedef struct {
     char *opts[32];
 } exec;
 
+#if defined(__linux__)
 static int uu_forkexec(char **argv)
 {
     int pid = fork();
@@ -36,9 +47,37 @@ static int uu_forkexec(char **argv)
     }
     }
 }
+#elif defined(_WIN32)
+static int uu_forkexec(char *argv)
+{
+    STARTUPINFO si = { .cb = sizeof(si), .dwFlags = STARTF_USESTDHANDLES };
+    PROCESS_INFORMATION pi = { 0 };
+    if (CreateProcess(NULL, argv, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) == 0) {
+        fprintf(stderr, "ERROR: CreateProcess: Failed with error 0x%lx\n", GetLastError());
+        exit(EXIT_FAILURE);
+    }
+    if (WaitForSingleObject(pi.hProcess, INFINITE) == WAIT_FAILED) {
+        fprintf(stderr, "ERROR: WaitForSingleObject: Failed with error 0x%lx\n", GetLastError());
+        exit(EXIT_FAILURE);
+    }
+
+    DWORD status;
+    if (GetExitCodeProcess(pi.hProcess, &status) == 0) {
+        fprintf(stderr, "ERROR: GetExitCodeProcess: Failed with error 0x%lx\n", GetLastError());
+        exit(EXIT_FAILURE);
+    }
+
+    // FIXME: I don't know, should we check for errors?
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    return status;
+}
+#endif
 
 static int uu_cc(exec exec)
 {
+#if defined(__linux__)
     char *argv[64];
     {
         int i = 0;
@@ -72,6 +111,11 @@ static int uu_cc(exec exec)
         argv[i] = NULL;
         putchar('\n');
     }
+#elif defined(_WIN32)
+    // FIXME: Change this hard-coded dirty test
+    char argv[256] = "cl.exe -o other " __FILE__;
+    printf("[CMD] %s\n", argv);
+#endif
     return uu_forkexec(argv);
 }
 
