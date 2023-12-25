@@ -12,6 +12,7 @@ typedef struct {
     char *name;
     char *files[32];
     char *opts[32];
+    char *libs[32];
 } exec;
 
 static int uu_forkexec(char **argv)
@@ -39,7 +40,7 @@ static int uu_forkexec(char **argv)
 
 static int uu_cc(exec exec)
 {
-    char *argv[64];
+    char *argv[96];
     {
         int i = 0;
 
@@ -65,6 +66,12 @@ static int uu_cc(exec exec)
 
         for (int f = 0; exec.files[f]; f += 1) {
             argv[i] = exec.files[f];
+            printf("%s ", argv[i]);
+            i += 1;
+        }
+
+        for (int l = 0; exec.libs[l]; l += 1) {
+            argv[i] = exec.libs[l];
             printf("%s ", argv[i]);
             i += 1;
         }
